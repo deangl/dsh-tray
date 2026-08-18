@@ -19,7 +19,7 @@ ICON_OFF   := A_ScriptDir "\assets\whale-gray.ico"
 A_IconTip := "DeepSeek Harness (dsh)"
 TraySetIcon(ICON_OFF)
 A_TrayMenu.Delete()
-A_TrayMenu.Add("启动 dsh", StartItem)
+A_TrayMenu.Add("重启 dsh", RestartItem)
 A_TrayMenu.Add("停止 dsh", StopItem)
 A_TrayMenu.Add()
 A_TrayMenu.Add("退出", ExitDsh)
@@ -118,7 +118,8 @@ StopDsh(*) {
 }
 OnExit StopDsh
 
-StartItem(*) {
+RestartItem(*) {
+    StopDsh()
     StartDsh()
 }
 
