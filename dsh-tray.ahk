@@ -117,7 +117,6 @@ StopDsh(*) {
     ps := A_ScriptDir "\tools\stop-dsh.ps1"
     try RunWait 'powershell -NoProfile -ExecutionPolicy Bypass -File "' ps '"', , "Hide"
 }
-OnExit StopDsh
 
 RestartItem(*) {
     StopDsh()
@@ -129,7 +128,6 @@ StopItem(*) {
 }
 
 ExitDsh(*) {
-    StopDsh()
     ExitApp
 }
 
