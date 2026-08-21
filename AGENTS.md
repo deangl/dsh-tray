@@ -29,8 +29,8 @@ Windows **AutoHotkey v2** tray app that manages the DeepSeek Harness (`dsh`) web
 
 ## Intentional behavior
 - Startup does not relaunch dsh if port 3080 is already served; icon state refreshes via a 2 s `UpdateStatus` timer (also called once at startup).
-- `OnExit StopDsh` is registered, so `#SingleInstance Force` reloads (re-launching the script) stop and restart dsh. Accepted.
-- Tray menu is static: 启动 dsh / 停止 dsh / 退出. Double-click opens the URL — Edge/Chrome get `--app` mode (default browser via `.html` UserChoice ProgId), anything else plain `Run`.
+- Exiting/reloading the tray app does **not** stop dsh — `StopDsh()` runs only via the 停止 dsh menu item, the 重启 dsh menu item, or the `-stop` CLI arg. So `#SingleInstance Force` reloads just take over the already-running service. Accepted.
+- Tray menu is static: 重启 dsh / 停止 dsh / 退出. Double-click opens the URL — Edge/Chrome get `--app` mode (default browser via `.html` UserChoice ProgId), anything else plain `Run`; the browser window is then moved/sized per `config.ini` `[window]` (x/y/w/h), or maximized if the config is missing/invalid.
 
 ## Layout
 - `dsh-tray.ahk` — all logic; config constants at top (`DSH_PORT`, `DSH_HOST`, `ICON_ON`, `ICON_OFF`).
