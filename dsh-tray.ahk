@@ -14,6 +14,7 @@ DSH_URL    := "http://" DSH_HOST ":" DSH_PORT
 DSH_ARGS   := "--host " DSH_HOST " --port " DSH_PORT
 ICON_ON    := A_ScriptDir "\assets\whale-blue.ico"
 ICON_OFF   := A_ScriptDir "\assets\whale-gray.ico"
+WIN_CONFIG := A_ScriptDir "\config.ini"
 
 ; ===== 托盘图标与菜单 =====
 A_IconTip := "DeepSeek Harness (dsh)"
@@ -154,6 +155,35 @@ OpenDshWeb() {
     } else {
         Run DSH_URL
     }
+    PositionWindow()
+}
+
+; 读配置文件里的位置尺寸；读不到（缺文件/缺键/非法值）返回 false → 全屏
+ReadWindowConfig(&x, &y, &w, &h) {
+    try {
+        x := IniRead(WIN_CONFIG, "window", "x", "")
+        y := IniRead(WIN_CONFIG, "window", "y", "")
+        w := IniRead(WIN_CONFIG, "window", "w", "")
+        h := IniRead(WIN_CONFIG, "window", "h", "")
+    } catch
+        return false
+    if !IsNumber(x) or !IsNumber(y) or !IsNumber(w) or !IsNumber(h)
+        return false
+    if x < 0 or y < 0 or w <= 0 or h <= 0
+        return false
+    return true
+}
+
+; 按配置移动/缩放已打开的浏览器窗口；配置读不到则最大化
+PositionWindow() {
+    SetTitleMatchMode 2
+    if !WinWait("DeepSeek Harness", , 5)
+        return
+    hwnd := WinExist("DeepSeek Harness")
+    if ReadWindowConfig(&x, &y, &w, &h)
+        WinMove(x, y, w, h, hwnd)
+    else
+        WinMaximize(hwnd)
 }
 
 FindBrowser(exe) {
