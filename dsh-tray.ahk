@@ -15,12 +15,14 @@ DSH_ARGS   := "--host " DSH_HOST " --port " DSH_PORT
 ICON_ON    := A_ScriptDir "\assets\whale-blue.ico"
 ICON_OFF   := A_ScriptDir "\assets\whale-gray.ico"
 WIN_CONFIG := A_ScriptDir "\config.ini"
+DSH_PROFILE := "web"   ; 热重启的目标 profile（对应 dsh --profile web）
 
 ; ===== 托盘图标与菜单 =====
 A_IconTip := "DeepSeek Harness (dsh)"
 TraySetIcon(ICON_OFF)
 A_TrayMenu.Delete()
-A_TrayMenu.Add("重启 dsh", RestartItem)
+A_TrayMenu.Add("冷重启 dsh", ColdRestartItem)
+A_TrayMenu.Add("热重启 dsh", HotRestartItem)
 A_TrayMenu.Add("停止 dsh", StopItem)
 A_TrayMenu.Add()
 A_TrayMenu.Add("退出", ExitDsh)
@@ -118,9 +120,33 @@ StopDsh(*) {
     try RunWait 'powershell -NoProfile -ExecutionPolicy Bypass -File "' ps '"', , "Hide"
 }
 
-RestartItem(*) {
+; 解析要热重启的 profile 补丁文件。
+; dsh 通过 watchUserPatches 用 Cordis HMR 监控该文件，内容一变即进程内事务性重放补丁（不重启进程），
+; 因此“touch”它（原样写回，触发 mtime 变化）就能让 dsh 在进程内热重载。
+DshProfilePatch() {
+    home := EnvGet("DSH_HOME")
+    if home = ""
+        home := EnvGet("UserProfile") "\.dsh"
+    return home "\profiles\" DSH_PROFILE "\cordis.patch.yml"
+}
+
+ColdRestartItem(*) {
     StopDsh()
     StartDsh()
+}
+
+HotRestartItem(*) {
+    if !IsRunning()
+        return
+    patch := DshProfilePatch()
+    try {
+        content := FileRead(patch)
+        f := FileOpen(patch, "w", "UTF-8")
+        f.Write(content)
+        f.Close()
+    } catch {
+        TrayTip "热重启失败", "无法写入: " patch, "Iconi"
+    }
 }
 
 StopItem(*) {

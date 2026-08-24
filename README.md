@@ -7,7 +7,7 @@ dsh 的 Web 界面默认运行在 `http://127.0.0.1:3080`。本工具把它从"�
 ## 功能特性
 
 - 🚀 **自动启动**：脚本运行后立即在后台（隐藏窗口）启动 `dsh web`，无需手动开终端；若 dsh 已在运行则不会重复启动，直接接管
-- 🎛️ **托盘菜单**：重启 dsh / 停止 dsh / 退出
+- 🎛️ **托盘菜单**：冷重启 dsh / 热重启 dsh / 停止 dsh / 退出
 - 🔵 **状态指示灯**：启动时立即检测一次，此后每 2 秒用原生 socket 探测 3080 端口 —— 蓝色 = 运行中，灰色 = 已停止
 - 🖱️ **双击打开**：双击托盘图标，用默认浏览器打开 dsh Web 界面
   - 默认浏览器是 Edge / Chrome 时，自动以 `--app` 应用模式打开（无地址栏，更像桌面应用）
@@ -59,7 +59,8 @@ h=800
 
 - **状态检测**：`UpdateStatus` 在启动时立即执行一次、此后每 2 秒调用 `IsRunning()` —— 用 `ws2_32` socket 直连 `DSH_HOST:DSH_PORT`（地址由 `ParseAddr()` 从配置解析）探测端口连通性，纯 socket 不阻塞消息循环，状态变化时切换托盘图标。
 - **启动**：先探测端口，已在运行则跳过；否则 `ResolveDshCmd()` 依次在 `%APPDATA%\npm`、`%LocalAppData%\npm` 下查找 `dsh.cmd`，都没有则使用 `npx -y @deepseek-ai/dsh`；以隐藏窗口方式运行 `dsh web --host 127.0.0.1 --port 3080`。
-- **重启**：托盘菜单「重启 dsh」先走「停止」逻辑，再走「启动」逻辑，即停止一次后重新拉起服务。
+- **冷重启**：托盘菜单「冷重启 dsh」先走「停止」逻辑，再走「启动」逻辑，即停止一次后重新拉起服务（完整冷启动，约 5-11 秒）。
+- **热重启**：托盘菜单「热重启 dsh」在进程内热重载——把 profile 的 `cordis.patch.yml` 原样写回（touch），dsh 的 `watchUserPatches`/Cordis HMR 监听到后**进程内**事务性重放补丁，不重启 node 进程、端口不断；dsh 未运行时为 no-op。profile 补丁路径按 `$DSH_HOME` → `~/.dsh` 解析，profile 名取 `DSH_PROFILE`（默认 `web`）。
 - **停止**：`tools/stop-dsh.ps1` 遍历 node.exe 进程，按命令行匹配 `dsh\lib\bin.js` 或 `@deepseek-ai/dsh` 的特征强杀。
 - **打开界面**：读取系统默认浏览器关联（`.html` 的 `UserChoice` ProgId），Edge/Chrome 走 `--app` 模式，其余直接 `Run` URL；随后按 `config.ini` 的 `[window]` 段定位浏览器窗口，读不到配置则最大化。
 
