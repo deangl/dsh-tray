@@ -2,6 +2,11 @@
 #SingleInstance Force
 Persistent
 
+; -check: 只加载/解析脚本后立刻退出（不碰 dsh、不建托盘）。注意 #SingleInstance Force
+;         是按“脚本文件名”匹配旧实例的，所以要在**副本**上跑，否则会顶掉正在运行的托盘实例。
+if A_Args.Length and A_Args[1] = "-check"
+    ExitApp
+; -stop: 停止 dsh 后退出（用于脚本/命令行调用）
 if A_Args.Length and A_Args[1] = "-stop" {
     StopDsh()
     ExitApp
@@ -11,11 +16,22 @@ if A_Args.Length and A_Args[1] = "-stop" {
 DSH_PORT   := 3080
 DSH_HOST   := "127.0.0.1"
 DSH_URL    := "http://" DSH_HOST ":" DSH_PORT
-DSH_ARGS   := "--host " DSH_HOST " --port " DSH_PORT
+DSH_ARGS   := "--no-open --host " DSH_HOST " --port " DSH_PORT
 ICON_ON    := A_ScriptDir "\assets\whale-blue.ico"
 ICON_OFF   := A_ScriptDir "\assets\whale-gray.ico"
 WIN_CONFIG := A_ScriptDir "\config.ini"
 DSH_PROFILE := "web"   ; 热重启的目标 profile（对应 dsh --profile web）
+
+; dsh 的浏览器认证（0.1.5 起）：每个进程随机生成一个 launch token，只有打开
+; "dsh web: http://127.0.0.1:3080/?token=..." 这个 URL 才能换取签名 Cookie，
+; 之后 30 天内裸地址也能直接进；否则根请求返回
+; 401 "dsh web authentication required; reopen the URL printed by dsh web"。
+; 托盘用隐藏窗口启动 dsh、看不到控制台，所以把 dsh 的 stdout/stderr 重定向到
+; 下面的日志，再从中解析出那一行（dsh 文档钦定的 supervisor 做法）。
+DSH_LOG       := A_Temp "\dsh-tray-web.log"
+WEB_AUTH_URL  := ""      ; 最近一次捕获到的带 token 的登录 URL（空 = 未知）
+WEB_URL_TICKS := 0       ; 等待 dsh 打印 URL 的计时（500ms/次）
+WEB_URL_WAIT_TICKS := 60 ; 最多等 30s
 
 ; ===== 托盘图标与菜单 =====
 A_IconTip := "DeepSeek Harness (dsh)"
@@ -79,6 +95,7 @@ ParseAddr(host) {
 }
 
 ; ===== 定位 dsh 命令 =====
+; 返回可直接拼进 "cmd /c call ..." 的命令片段：可执行文件始终带引号
 ResolveDshCmd() {
     static dsh := ""
     if dsh != ""
@@ -88,7 +105,7 @@ ResolveDshCmd() {
         EnvGet("LocalAppData") "\npm\dsh.cmd",
     ] {
         if FileExist(c) {
-            dsh := c
+            dsh := '"' c '"'
             return dsh
         }
     }
@@ -104,15 +121,44 @@ ResolveDshCmd() {
 
 ; ===== 启动 / 停止 =====
 StartDsh() {
+    global WEB_AUTH_URL, WEB_URL_TICKS, DSH_LOG
     if IsRunning()
         return
+    WEB_AUTH_URL := ""
+    WEB_URL_TICKS := 0
+    try FileDelete DSH_LOG
     cmd := ResolveDshCmd()
-    launch := cmd " web " DSH_ARGS
+    ; 走 cmd /c + call，才能把 dsh 的输出重定向进日志（AHK 的 Run 本身拿不到 stdout）
+    launch := A_ComSpec ' /c call ' cmd ' web ' DSH_ARGS ' > "' DSH_LOG '" 2>&1'
     try {
         Run launch, , "Hide"
+        SetTimer WatchWebUrl, 500
     } catch {
         TrayTip "无法启动 dsh", "命令: " launch, "Iconi"
     }
+}
+
+; 轮询日志，抓取 dsh 启动时打印的登录 URL；抓到（或超时）就停表
+WatchWebUrl() {
+    global WEB_AUTH_URL, WEB_URL_TICKS
+    WEB_URL_TICKS += 1
+    url := ReadWebAuthUrl()
+    if (url != "")
+        WEB_AUTH_URL := url
+    if (WEB_AUTH_URL != "" or WEB_URL_TICKS >= WEB_URL_WAIT_TICKS)
+        SetTimer WatchWebUrl, 0
+}
+
+; 从 dsh 输出里取最后一次打印的 "dsh web: <url>"。
+; (?s) 让 .* 跨越换行并贪婪匹配，因此热重启再次打印时拿到的是最新那条。
+ReadWebAuthUrl() {
+    global DSH_LOG
+    try txt := FileRead(DSH_LOG, "CP0")
+    catch
+        return ""
+    if RegExMatch(txt, "(?s).*dsh web:\s*(http://\S+)", &m)
+        return m[1]
+    return ""
 }
 
 StopDsh(*) {
@@ -136,6 +182,7 @@ ColdRestartItem(*) {
 }
 
 HotRestartItem(*) {
+    global WEB_URL_TICKS
     if !IsRunning()
         return
     patch := DshProfilePatch()
@@ -146,7 +193,11 @@ HotRestartItem(*) {
         f.Close()
     } catch {
         TrayTip "热重启失败", "无法写入: " patch, "Iconi"
+        return
     }
+    ; 热重载可能重建连接、重新分配 launch token 并再打印一行 URL，重新守一下日志
+    WEB_URL_TICKS := 0
+    SetTimer WatchWebUrl, 500
 }
 
 StopItem(*) {
@@ -164,20 +215,30 @@ TrayIconMsg(wParam, lParam, msg, hwnd) {
 }
 
 OpenDshWeb() {
+    global WEB_AUTH_URL
+    ; 优先用带 token 的登录 URL：它会顺带刷新 30 天 Cookie；
+    ; 拿不到时退回裸地址（Cookie 还在的话照样能进）
+    url := WEB_AUTH_URL
+    if (url = "")
+        url := ReadWebAuthUrl()
+    if (url = "") {
+        url := DSH_URL
+        TrayTip "dsh 登录 URL 未知", "浏览器若提示 authentication required，请用「冷重启 dsh」重建。", "Iconi"
+    }
     progId := ""
     try progId := RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.html\UserChoice", "ProgId")
     if RegExMatch(progId, "i)MSEdge") {
         if (exe := FindBrowser("msedge.exe"))
-            Run '"' exe '" --app="' DSH_URL '"'
+            Run '"' exe '" --app="' url '"'
         else
-            Run DSH_URL
+            Run url
     } else if RegExMatch(progId, "i)Chrome") {
         if (exe := FindBrowser("chrome.exe"))
-            Run '"' exe '" --app="' DSH_URL '"'
+            Run '"' exe '" --app="' url '"'
         else
-            Run DSH_URL
+            Run url
     } else {
-        Run DSH_URL
+        Run url
     }
     PositionWindow()
 }
@@ -226,5 +287,8 @@ FindBrowser(exe) {
 }
 
 ; ===== 启动时自动在后台运行 dsh web（已在运行则不重复启动） =====
-StartDsh()
+if IsRunning()
+    WEB_AUTH_URL := ReadWebAuthUrl()   ; 托盘重启：复用仍在跑的那个 dsh 打印过的登录 URL
+else
+    StartDsh()
 UpdateStatus()
